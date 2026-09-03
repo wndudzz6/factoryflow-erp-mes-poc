@@ -1,4 +1,4 @@
-package FactoryFlow.ERP;
+package com.factoryflow.erp;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
