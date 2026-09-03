@@ -1,3 +1,19 @@
 spring:
   application:
     name: mes
+
+  datasource:
+    url: jdbc:sqlserver://localhost:1433;databaseName=factoryflow_mes;encrypt=true;trustServerCertificate=true
+    username: sa
+    password: ${MES_DB_PASSWORD}
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+server:
+  port: 8081
