@@ -14,6 +14,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
+import com.factoryflow.mes.workorder.dto.WorkOrderSyncResponse;
+import com.factoryflow.mes.workorder.entity.WorkOrderExecutionStatus;
+import com.factoryflow.mes.workorder.exception.WorkOrderConflictException;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.CsvSource;
+import static com.factoryflow.mes.workorder.dto.WorkOrderSyncResponse.Result.*;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -101,7 +108,7 @@ class WorkOrderSyncServiceTest {
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         // when
-        workOrderSyncService.sync(request);
+        assertThat(workOrderSyncService.sync(request).result()).isEqualTo(CREATED);
 
         // then
         ArgumentCaptor<WorkOrder> captor =
@@ -146,7 +153,7 @@ class WorkOrderSyncServiceTest {
         )).thenReturn(Optional.of(existing));
 
         // when
-        workOrderSyncService.sync(sameVersionRequest);
+        assertThat(workOrderSyncService.sync(sameVersionRequest).result()).isEqualTo(IGNORED_SAME_VERSION);
 
         // then
         assertThat(existing.getPlannedQuantity()).isEqualTo(100);
@@ -177,7 +184,7 @@ class WorkOrderSyncServiceTest {
         )).thenReturn(Optional.of(existing));
 
         // when
-        workOrderSyncService.sync(oldVersionRequest);
+        assertThat(workOrderSyncService.sync(oldVersionRequest).result()).isEqualTo(IGNORED_OLD_VERSION);
 
         // then
         assertThat(existing.getPlannedQuantity()).isEqualTo(300);
@@ -208,11 +215,12 @@ class WorkOrderSyncServiceTest {
         )).thenReturn(Optional.of(existing));
 
         // when
-        WorkOrder result = workOrderSyncService.sync(latestRequest);
+        WorkOrderSyncResponse result = workOrderSyncService.sync(latestRequest);
 
         // then
-        assertThat(result.getPlannedQuantity()).isEqualTo(500);
-        assertThat(result.getSourceVersion()).isEqualTo(3);
+        assertThat(existing.getPlannedQuantity()).isEqualTo(500);
+        assertThat(result.appliedVersion()).isEqualTo(3);
+        assertThat(result.result()).isEqualTo(UPDATED);
     }
 
     @Test
@@ -233,5 +241,86 @@ class WorkOrderSyncServiceTest {
                 .isInstanceOf(IllegalArgumentException.class);
 
         verifyNoInteractions(workOrderRepository);
+    }
+
+    private WorkOrder prepared(WorkOrderExecutionStatus status) {
+        WorkOrder workOrder = createExistingWorkOrder(1, 100);
+        if (status == WorkOrderExecutionStatus.COMPLETED) {
+            workOrder.changeExecutionStatus(WorkOrderExecutionStatus.IN_PROGRESS);
+        }
+        workOrder.changeExecutionStatus(status);
+        when(workOrderRepository.findBySourceSystemAndExternalId(SourceSystem.ERP, 1L))
+                .thenReturn(Optional.of(workOrder));
+        return workOrder;
+    }
+
+    private WorkOrderSyncRequest changed(int quantity, String routing, int revision) {
+        return new WorkOrderSyncRequest(SourceSystem.ERP, UUID.randomUUID(), "WORK_ORDER_UPDATED",
+                1L, request.workOrderNo(), 2, request.productCode(), quantity,
+                request.dueDate().plusDays(1), 2, routing, revision);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = WorkOrderExecutionStatus.class, names = {"PLANNED", "READY"})
+    void majorChangesAllowedBeforeProduction(WorkOrderExecutionStatus status) {
+        WorkOrder existing = prepared(status);
+        assertThat(workOrderSyncService.sync(changed(200, "ROUTING-B", 2)).result()).isEqualTo(UPDATED);
+        assertThat(existing.getPlannedQuantity()).isEqualTo(200);
+        assertThat(existing.getRoutingCode()).isEqualTo("ROUTING-B");
+        assertThat(existing.getRoutingRevision()).isEqualTo(2);
+        assertThat(existing.getSourceVersion()).isEqualTo(2);
+        assertThat(existing.getExecutionStatus()).isEqualTo(status);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"200,ROUTING-A,1", "100,ROUTING-B,1", "100,ROUTING-A,2"})
+    void eachMajorFieldIsBlockedAfterStart(int quantity, String routing, int revision) {
+        WorkOrder existing = prepared(WorkOrderExecutionStatus.IN_PROGRESS);
+        assertThatThrownBy(() -> workOrderSyncService.sync(changed(quantity, routing, revision)))
+                .isInstanceOf(WorkOrderConflictException.class).hasMessageContaining("생산 시작 후");
+        assertThat(existing.getPlannedQuantity()).isEqualTo(100);
+        assertThat(existing.getRoutingCode()).isEqualTo("ROUTING-A");
+        assertThat(existing.getRoutingRevision()).isEqualTo(1);
+        assertThat(existing.getDueDate()).isEqualTo(request.dueDate());
+        assertThat(existing.getPriority()).isEqualTo(1);
+        assertThat(existing.getSourceVersion()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = WorkOrderExecutionStatus.class, names = {"COMPLETED", "CANCELLED"})
+    void terminalStatesBlockMajorChanges(WorkOrderExecutionStatus status) {
+        WorkOrder existing = prepared(status);
+        assertThatThrownBy(() -> workOrderSyncService.sync(changed(200, "ROUTING-A", 1)))
+                .isInstanceOf(WorkOrderConflictException.class);
+        assertThat(existing.getSourceVersion()).isEqualTo(1);
+    }
+
+    @Test
+    void dueDateAndPriorityCanChangeAfterStart() {
+        WorkOrder existing = prepared(WorkOrderExecutionStatus.IN_PROGRESS);
+        assertThat(workOrderSyncService.sync(changed(100, "ROUTING-A", 1)).result()).isEqualTo(UPDATED);
+        assertThat(existing.getDueDate()).isEqualTo(request.dueDate().plusDays(1));
+        assertThat(existing.getPriority()).isEqualTo(2);
+        assertThat(existing.getExecutionStatus()).isEqualTo(WorkOrderExecutionStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void repeatedVersionIsIgnoredEvenAfterProductionStarts() {
+        WorkOrder existing = prepared(WorkOrderExecutionStatus.IN_PROGRESS);
+        assertThat(workOrderSyncService.sync(request).result()).isEqualTo(IGNORED_SAME_VERSION);
+        assertThat(existing.getSourceVersion()).isEqualTo(1);
+    }
+
+    @Test
+    void productionStateCannotGoBackToPlanned() {
+        WorkOrder existing = createExistingWorkOrder(1, 100);
+        when(workOrderRepository.findById(1L)).thenReturn(Optional.of(existing));
+        assertThat(workOrderSyncService.changeExecutionStatus(1L, WorkOrderExecutionStatus.IN_PROGRESS)
+                .executionStatus()).isEqualTo(WorkOrderExecutionStatus.IN_PROGRESS);
+        assertThatThrownBy(() -> workOrderSyncService.changeExecutionStatus(1L, WorkOrderExecutionStatus.PLANNED))
+                .isInstanceOf(WorkOrderConflictException.class);
+        workOrderSyncService.changeExecutionStatus(1L, WorkOrderExecutionStatus.COMPLETED);
+        assertThatThrownBy(() -> workOrderSyncService.changeExecutionStatus(1L, WorkOrderExecutionStatus.IN_PROGRESS))
+                .isInstanceOf(WorkOrderConflictException.class);
     }
 }

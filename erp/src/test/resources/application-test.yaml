@@ -1,0 +1,14 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:factoryflow_erp_test;MODE=MSSQLServer;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+mes:
+  api:
+    base-url: http://mes.test
