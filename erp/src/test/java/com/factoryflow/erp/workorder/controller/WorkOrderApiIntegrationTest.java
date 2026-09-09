@@ -210,4 +210,14 @@ class WorkOrderApiIntegrationTest {
                 .andExpect(status().isBadRequest());
         assertThat(stored(id).getVersion()).isEqualTo(1);
     }
+
+    @Test
+    void openApiPublishesRequestExamplesAndErrorContracts() throws Exception {
+        mvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paths['/api/work-orders'].post.responses['201']").exists())
+                .andExpect(jsonPath("$.paths['/api/work-orders/{id}'].put.requestBody.content['application/json'].examples.request").exists())
+                .andExpect(jsonPath("$.paths['/api/work-orders/{id}'].put.responses['200'].content['application/json'].examples.mesFailure").exists())
+                .andExpect(jsonPath("$.paths['/api/work-orders/{id}/resend'].post.responses['409']").exists());
+    }
 }

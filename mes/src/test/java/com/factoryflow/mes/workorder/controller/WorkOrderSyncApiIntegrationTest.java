@@ -153,4 +153,14 @@ class WorkOrderSyncApiIntegrationTest {
                 .andExpect(status().isConflict());
         assertThat(repository.count()).isEqualTo(1);
     }
+
+    @Test
+    void openApiPublishesRequestExamplesAndErrorContracts() throws Exception {
+        mvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paths['/api/work-orders/sync'].post.responses['200'].content['application/json'].examples.IGNORED_SAME_VERSION").exists())
+                .andExpect(jsonPath("$.paths['/api/work-orders/sync'].post.responses['200'].content['application/json'].examples.IGNORED_OLD_VERSION").exists())
+                .andExpect(jsonPath("$.paths['/api/work-orders/sync'].post.responses['409']").exists())
+                .andExpect(jsonPath("$.paths['/api/work-orders/{id}/execution-status'].patch.requestBody").exists());
+    }
 }

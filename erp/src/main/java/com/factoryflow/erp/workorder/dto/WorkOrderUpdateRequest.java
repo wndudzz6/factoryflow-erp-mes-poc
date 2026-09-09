@@ -1,13 +1,16 @@
 package com.factoryflow.erp.workorder.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import jakarta.validation.constraints.*;
 import java.time.LocalDate;
 
+@Schema(description = "다섯 계획 필드 전체 교체. 실제 변경이 있을 때만 버전 증가. routingCode는 null 허용.")
 public record WorkOrderUpdateRequest(
-        @Positive int plannedQuantity,
+        @Positive @Schema(description = "계획수량: 1 이상") int plannedQuantity,
         @NotNull LocalDate dueDate,
-        @PositiveOrZero int priority,
+        @PositiveOrZero @Schema(description = "우선순위: 0 이상") int priority,
         @Size(max = 255) String routingCode,
-        @Positive int routingRevision
+        @Positive @Schema(description = "라우팅 리비전: 1 이상") int routingRevision
 ) {
 }

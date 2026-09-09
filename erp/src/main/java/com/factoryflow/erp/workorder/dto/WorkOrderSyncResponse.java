@@ -1,5 +1,8 @@
 package com.factoryflow.erp.workorder.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
+@Schema(description = "receivedVersion은 수신 버전, appliedVersion은 현재 MES 적용 버전. id는 MES 내부 식별자.")
 public record WorkOrderSyncResponse(
         Long id,
         String workOrderNo,
