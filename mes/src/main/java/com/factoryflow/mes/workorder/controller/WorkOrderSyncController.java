@@ -1,7 +1,10 @@
 package com.factoryflow.mes.workorder.controller;
 
 import com.factoryflow.mes.workorder.dto.WorkOrderSyncRequest;
-import com.factoryflow.mes.workorder.entity.WorkOrder;
+import com.factoryflow.mes.workorder.dto.WorkOrderSyncResponse;
+import com.factoryflow.mes.workorder.dto.WorkOrderExecutionStatusRequest;
+import com.factoryflow.mes.workorder.dto.WorkOrderExecutionStatusResponse;
+import jakarta.validation.Valid;
 import com.factoryflow.mes.workorder.service.WorkOrderSyncService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -15,10 +18,16 @@ public class WorkOrderSyncController {
     private final WorkOrderSyncService workOrderSyncService;
 
     @PostMapping("/sync")
-    public ResponseEntity<WorkOrder> sync(
-            @RequestBody WorkOrderSyncRequest request
+    public ResponseEntity<WorkOrderSyncResponse> sync(
+            @Valid @RequestBody WorkOrderSyncRequest request
     ) {
-        WorkOrder workOrder = workOrderSyncService.sync(request);
-        return ResponseEntity.ok(workOrder);
+        return ResponseEntity.ok(workOrderSyncService.sync(request));
+    }
+    @PatchMapping("/{id}/execution-status")
+    public ResponseEntity<WorkOrderExecutionStatusResponse> changeExecutionStatus(
+            @PathVariable Long id,
+            @Valid @RequestBody WorkOrderExecutionStatusRequest request
+    ) {
+        return ResponseEntity.ok(workOrderSyncService.changeExecutionStatus(id, request.executionStatus()));
     }
 }
