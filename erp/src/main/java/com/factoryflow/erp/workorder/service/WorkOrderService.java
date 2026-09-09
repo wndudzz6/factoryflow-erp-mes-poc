@@ -1,6 +1,12 @@
 package com.factoryflow.erp.workorder.service;
 
 import com.factoryflow.erp.workorder.client.MesWorkOrderClient;
+import com.factoryflow.erp.workorder.client.MesSyncRejectedResponseException;
+import com.factoryflow.erp.workorder.dto.WorkOrderSyncRequest;
+import com.factoryflow.erp.workorder.dto.WorkOrderSyncResponse;
+import com.factoryflow.erp.workorder.entity.MesSyncAttempt;
+import com.factoryflow.erp.workorder.entity.MesSyncResult;
+import com.factoryflow.erp.workorder.repository.MesSyncAttemptRepository;
 import com.factoryflow.erp.workorder.dto.WorkOrderCreateRequest;
 import com.factoryflow.erp.workorder.dto.WorkOrderUpdateRequest;
 import com.factoryflow.erp.workorder.entity.MesSyncStatus;
@@ -19,6 +25,7 @@ public class WorkOrderService {
 
     private final WorkOrderRepository workOrderRepository;
     private final MesWorkOrderClient mesWorkOrderClient;
+    private final MesSyncAttemptRepository mesSyncAttemptRepository;
 
     public WorkOrder create(WorkOrderCreateRequest request) {
         validateDuplicateWorkOrderNo(request.workOrderNo());
@@ -56,12 +63,21 @@ public class WorkOrderService {
 
     private void synchronize(WorkOrder workOrder) {
         workOrder.markSyncPending();
+        WorkOrderSyncRequest request = WorkOrderSyncRequest.from(workOrder);
+        MesSyncAttempt attempt = mesSyncAttemptRepository.save(MesSyncAttempt.pending(request));
+        WorkOrderSyncResponse response;
         try {
-            mesWorkOrderClient.sync(workOrder);
-            workOrder.markSyncSuccess();
+            response = mesWorkOrderClient.sync(request);
         } catch (Exception exception) {
-            workOrder.markSyncFailed(getErrorMessage(exception));
+            String error = getErrorMessage(exception);
+            MesSyncResult result = exception instanceof MesSyncRejectedResponseException rejected
+                    ? MesSyncResult.valueOf(rejected.getResponse().result().name()) : null;
+            attempt.fail(error, result);
+            workOrder.markSyncFailed(error);
+            return;
         }
+        attempt.succeed(MesSyncResult.valueOf(response.result().name()));
+        workOrder.markSyncSuccess();
     }
 
     private void validateDuplicateWorkOrderNo(String workOrderNo) {

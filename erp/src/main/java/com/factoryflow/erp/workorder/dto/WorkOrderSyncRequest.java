@@ -10,7 +10,7 @@ import java.util.UUID;
 
 public record WorkOrderSyncRequest(
         SourceSystem sourceSystem,
-        UUID eventId,
+        @Schema(description = "전송 시도 추적 ID. 재전송마다 새로 발급하며 멱등성 키가 아님") UUID eventId,
         String eventType,
 
         Long externalId,
