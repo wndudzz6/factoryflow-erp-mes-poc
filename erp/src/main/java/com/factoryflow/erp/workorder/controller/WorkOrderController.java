@@ -35,4 +35,8 @@ public class WorkOrderController {
     ) {
         return ResponseEntity.ok(WorkOrderResponse.from(workOrderService.update(id, request)));
     }
+    @PostMapping("/{id}/resend")
+    public ResponseEntity<WorkOrderResponse> resend(@PathVariable Long id) {
+        return ResponseEntity.ok(WorkOrderResponse.from(workOrderService.resend(id)));
+    }
 }

@@ -39,6 +39,16 @@ public class WorkOrderService {
         return workOrder;
     }
 
+    public WorkOrder resend(Long id) {
+        WorkOrder workOrder = findWorkOrder(id);
+        if (workOrder.getMesSyncStatus() != MesSyncStatus.FAILED) {
+            throw new IllegalStateException("FAILED 작업지시만 재전송할 수 있습니다. 현재 상태: "
+                    + workOrder.getMesSyncStatus());
+        }
+        synchronize(workOrder);
+        return workOrder;
+    }
+
     private WorkOrder findWorkOrder(Long id) {
         return workOrderRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("작업지시를 찾을 수 없습니다: " + id));
