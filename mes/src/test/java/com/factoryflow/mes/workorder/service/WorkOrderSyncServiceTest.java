@@ -35,6 +35,9 @@ class WorkOrderSyncServiceTest {
     @Mock
     private WorkOrderRepository workOrderRepository;
 
+    @Mock private com.factoryflow.mes.workorder.repository.WorkOrderSyncHistoryRepository historyRepository;
+    @Mock private WorkOrderSyncHistoryWriter historyWriter;
+
     @InjectMocks
     private WorkOrderSyncService workOrderSyncService;
 
