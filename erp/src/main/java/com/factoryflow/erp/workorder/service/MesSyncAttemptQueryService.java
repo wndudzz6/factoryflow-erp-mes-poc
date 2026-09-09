@@ -2,7 +2,6 @@ package com.factoryflow.erp.workorder.service;
 
 import com.factoryflow.erp.workorder.dto.MesSyncAttemptResponse;
 import com.factoryflow.erp.workorder.dto.HistoryPageResponse;
-import com.factoryflow.erp.workorder.entity.WorkOrder;
 import com.factoryflow.erp.workorder.repository.MesSyncAttemptRepository;
 import com.factoryflow.erp.workorder.repository.WorkOrderRepository;
 import lombok.RequiredArgsConstructor;

@@ -23,8 +23,7 @@ public class MesWorkOrderClient {
 
         if (response == null || response.result() == null
                 || !Objects.equals(response.workOrderNo(), request.workOrderNo())
-                || response.receivedVersion() != request.version()
-) {
+                || response.receivedVersion() != request.version()) {
             throw new IllegalStateException("MES 동기화 결과 불일치: " + response);
         }
         if (response.result() == WorkOrderSyncResponse.Result.IGNORED_OLD_VERSION

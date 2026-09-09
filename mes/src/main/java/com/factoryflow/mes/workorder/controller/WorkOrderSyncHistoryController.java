@@ -23,12 +23,12 @@ import java.util.UUID;
         """)))
 @ApiResponse(responseCode = "404", description = "작업지시 또는 eventId가 없음", content = @Content(
         mediaType = "application/json", schema = @Schema(implementation = ApiError.class),
-        examples = @ExampleObject(value = """
+        examples = @ExampleObject(name = "error", value = """
         {"status":404,"message":"이력을 찾을 수 없습니다.","workOrderNo":null,"executionStatus":null}
         """)))
 @ApiResponse(responseCode = "400", description = "식별자 형식 또는 페이징 값 오류", content = @Content(
         mediaType = "application/json", schema = @Schema(implementation = ApiError.class),
-        examples = @ExampleObject(value = """
+        examples = @ExampleObject(name = "error", value = """
         {"status":400,"message":"page는 0 이상, size는 1~100이어야 합니다.","workOrderNo":null,"executionStatus":null}
         """)))
 public class WorkOrderSyncHistoryController {
