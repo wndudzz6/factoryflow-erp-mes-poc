@@ -17,7 +17,7 @@ import java.util.UUID;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api")
-@ApiResponse(responseCode = "200", description = "최신순 이력 페이지", content = @Content(
+@ApiResponse(responseCode = "200", useReturnTypeSchema = true, description = "최신순 이력 페이지", content = @Content(
         mediaType = "application/json", examples = @ExampleObject(name = "history", value = """
         {"content":[{"id":1,"mesWorkOrderId":11,"eventId":"11111111-1111-1111-1111-111111111111","sourceSystem":"ERP","externalId":7,"workOrderNo":"WO-001","receivedVersion":1,"previousVersion":null,"appliedVersion":1,"result":"CREATED","message":"신규 생성","receivedAt":"2026-09-09T12:00:00","completedAt":"2026-09-09T12:00:01"}],"page":0,"size":20,"totalElements":1,"totalPages":1}
         """)))
