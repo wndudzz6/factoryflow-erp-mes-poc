@@ -1,5 +1,7 @@
 package com.factoryflow.erp.workorder.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import com.factoryflow.erp.workorder.entity.SourceSystem;
 import com.factoryflow.erp.workorder.entity.WorkOrder;
 
@@ -13,22 +15,22 @@ public record WorkOrderSyncRequest(
 
         Long externalId,
         String workOrderNo,
-        int version,
+        @Schema(description = "ERP 계획 버전. 계획 변경 시 증가하고 통신 재전송 시 유지") int version,
 
         String productCode,
-        int plannedQuantity,
+        @Schema(description = "계획수량: 1 이상") int plannedQuantity,
         LocalDate dueDate,
-        int priority,
+        @Schema(description = "우선순위: 0 이상") int priority,
 
         String routingCode,
-        int routingRevision
+        @Schema(description = "라우팅 리비전: 1 이상") int routingRevision
 ) {
 
-    public static WorkOrderSyncRequest created(WorkOrder workOrder) {
+    public static WorkOrderSyncRequest from(WorkOrder workOrder) {
         return new WorkOrderSyncRequest(
                 SourceSystem.ERP,
                 UUID.randomUUID(),
-                "WORK_ORDER_CREATED",
+                workOrder.getVersion() == 1 ? "WORK_ORDER_CREATED" : "WORK_ORDER_UPDATED",
 
                 workOrder.getId(),
                 workOrder.getWorkOrderNo(),
