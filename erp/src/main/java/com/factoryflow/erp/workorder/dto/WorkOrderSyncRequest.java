@@ -24,11 +24,11 @@ public record WorkOrderSyncRequest(
         int routingRevision
 ) {
 
-    public static WorkOrderSyncRequest created(WorkOrder workOrder) {
+    public static WorkOrderSyncRequest from(WorkOrder workOrder) {
         return new WorkOrderSyncRequest(
                 SourceSystem.ERP,
                 UUID.randomUUID(),
-                "WORK_ORDER_CREATED",
+                workOrder.getVersion() == 1 ? "WORK_ORDER_CREATED" : "WORK_ORDER_UPDATED",
 
                 workOrder.getId(),
                 workOrder.getWorkOrderNo(),

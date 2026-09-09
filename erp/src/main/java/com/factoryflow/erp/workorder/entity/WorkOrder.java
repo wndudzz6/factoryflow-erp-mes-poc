@@ -1,6 +1,8 @@
 package com.factoryflow.erp.workorder.entity;
 
 import com.factoryflow.erp.workorder.dto.WorkOrderCreateRequest;
+import com.factoryflow.erp.workorder.dto.WorkOrderUpdateRequest;
+import java.util.Objects;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -86,6 +88,29 @@ public class WorkOrder {
         return workOrder;
     }
 
+    public boolean changePlan(WorkOrderUpdateRequest request) {
+        if (plannedQuantity == request.plannedQuantity()
+                && Objects.equals(dueDate, request.dueDate())
+                && priority == request.priority()
+                && Objects.equals(routingCode, request.routingCode())
+                && routingRevision == request.routingRevision()) {
+            return false;
+        }
+        plannedQuantity = request.plannedQuantity();
+        dueDate = request.dueDate();
+        priority = request.priority();
+        routingCode = request.routingCode();
+        routingRevision = request.routingRevision();
+        version++;
+        markSyncPending();
+        return true;
+    }
+
+    public void markSyncPending() {
+        mesSyncStatus = MesSyncStatus.PENDING;
+        mesSyncError = null;
+    }
+
     public void markSyncSuccess() {
         this.mesSyncStatus = MesSyncStatus.SUCCESS;
         this.mesSyncError = null;
@@ -93,6 +118,6 @@ public class WorkOrder {
 
     public void markSyncFailed(String message) {
         this.mesSyncStatus = MesSyncStatus.FAILED;
-        this.mesSyncError = message;
+        this.mesSyncError = message == null ? null : message.substring(0, Math.min(message.length(), 1000));
     }
 }

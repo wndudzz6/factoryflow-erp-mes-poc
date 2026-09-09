@@ -3,7 +3,7 @@ package com.factoryflow.erp.workorder.dto;
 import com.factoryflow.erp.workorder.entity.MesSyncStatus;
 import com.factoryflow.erp.workorder.entity.WorkOrder;
 
-public record WorkOrderCreateResponse(
+public record WorkOrderResponse(
         Long id,
         String workOrderNo,
         int version,
@@ -11,8 +11,8 @@ public record WorkOrderCreateResponse(
         String mesSyncError
 ) {
 
-    public static WorkOrderCreateResponse from(WorkOrder workOrder) {
-        return new WorkOrderCreateResponse(
+    public static WorkOrderResponse from(WorkOrder workOrder) {
+        return new WorkOrderResponse(
                 workOrder.getId(),
                 workOrder.getWorkOrderNo(),
                 workOrder.getVersion(),
