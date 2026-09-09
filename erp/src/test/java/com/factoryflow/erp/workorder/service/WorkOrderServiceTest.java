@@ -245,7 +245,7 @@ class WorkOrderServiceTest {
 
     @Test
     void longErrorsFitExistingDatabaseColumn() {
-        WorkOrder existing = existing();
+        WorkOrder existing = WorkOrder.create(request);
         existing.markSyncFailed("x".repeat(2000));
         assertThat(existing.getMesSyncError()).hasSize(1000);
     }
