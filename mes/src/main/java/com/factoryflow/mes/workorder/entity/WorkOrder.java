@@ -111,7 +111,8 @@ public class WorkOrder {
     public void validatePlanChange(WorkOrderSyncRequest request) {
         if (!Objects.equals(workOrderNo, request.workOrderNo())
                 || !Objects.equals(productCode, request.productCode())) {
-            throw new WorkOrderConflictException(this, "작업지시 번호와 품목 코드는 변경할 수 없습니다.");
+            throw new WorkOrderConflictException(this, "작업지시 번호와 품목 코드는 변경할 수 없습니다.",
+                    WorkOrderSyncResult.REJECTED_IDENTITY_CONFLICT);
         }
         boolean majorChange = plannedQuantity != request.plannedQuantity()
                 || !Objects.equals(routingCode, request.routingCode())
