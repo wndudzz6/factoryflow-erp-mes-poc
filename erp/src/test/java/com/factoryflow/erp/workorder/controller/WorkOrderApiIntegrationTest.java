@@ -48,6 +48,7 @@ class WorkOrderApiIntegrationTest {
              "routingCode":"ROUTING-B","routingRevision":2}
             """;
 
+    @Autowired com.factoryflow.erp.workorder.repository.MesSyncAttemptRepository attempts;
     @Autowired MockMvc mvc;
     @Autowired WorkOrderRepository repository;
     @Autowired MockRestServiceServer mes;
@@ -64,6 +65,7 @@ class WorkOrderApiIntegrationTest {
     @BeforeEach
     void setUp() {
         mes.reset();
+        attempts.deleteAll();
         repository.deleteAll();
     }
 
@@ -92,6 +94,11 @@ class WorkOrderApiIntegrationTest {
         mvc.perform(post("/api/work-orders").contentType(MediaType.APPLICATION_JSON).content(CREATE))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.version").value(1));
         return repository.findByWorkOrderNo("WO-API-001").orElseThrow().getId();
+    }
+
+    private java.util.List<com.factoryflow.erp.workorder.entity.MesSyncAttempt> history(Long id) {
+        return attempts.findByWorkOrderId(id, org.springframework.data.domain.PageRequest.of(0, 100,
+                org.springframework.data.domain.Sort.by("id"))).getContent();
     }
 
     private WorkOrder stored(Long id) { return repository.findById(id).orElseThrow(); }
@@ -124,9 +131,15 @@ class WorkOrderApiIntegrationTest {
         assertThat(saved.getVersion()).isEqualTo(2);
         mes.verify();
         mes.reset();
+        assertThat(history(id)).hasSize(2);
+        assertThat(history(id)).extracting(a -> a.getVersion()).containsExactly(1, 2);
+        assertThat(history(id)).extracting(a -> a.getStatus()).containsOnly(MesSyncStatus.SUCCESS);
+        assertThat(history(id)).extracting(a -> a.getMesResult().name()).containsExactly("CREATED", "UPDATED");
+        assertThat(history(id)).extracting(a -> a.getEventType()).containsExactly("WORK_ORDER_CREATED", "WORK_ORDER_UPDATED");
         // No expectation: any additional MES call fails this test.
         mvc.perform(put("/api/work-orders/{id}", id).contentType(MediaType.APPLICATION_JSON).content(UPDATE))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.version").value(2));
+        assertThat(history(id)).hasSize(2);
     }
 
     @ParameterizedTest
@@ -143,6 +156,20 @@ class WorkOrderApiIntegrationTest {
                 .andExpect(jsonPath("$.version").value(1)).andExpect(jsonPath("$.mesSyncStatus").value("SUCCESS"));
         assertThat(stored(id).getVersion()).isEqualTo(1);
         assertThat(stored(id).getMesSyncError()).isNull();
+        var rows = history(id);
+        assertThat(rows).hasSize(2);
+        assertThat(rows).extracting(a -> a.getVersion()).containsExactly(1, 1);
+        assertThat(rows).extracting(a -> a.getStatus()).containsExactly(MesSyncStatus.FAILED, MesSyncStatus.SUCCESS);
+        assertThat(rows.get(0).getErrorReason()).contains("response lost");
+        assertThat(rows.get(0).getMesResult()).isNull();
+        assertThat(rows.get(1).getMesResult().name()).isEqualTo(result);
+        assertThat(rows.get(1).getErrorReason()).isNull();
+        assertThat(rows.get(0).getEventId()).isNotEqualTo(rows.get(1).getEventId());
+        assertThat(rows).allSatisfy(a -> {
+            assertThat(a.getWorkOrderId()).isEqualTo(id);
+            assertThat(a.getWorkOrderNo()).isEqualTo("WO-API-001");
+            assertThat(a.getCompletedAt()).isAfterOrEqualTo(a.getRequestedAt());
+        });
     }
 
     @Test
@@ -173,6 +200,14 @@ class WorkOrderApiIntegrationTest {
         mvc.perform(post("/api/work-orders/{id}/resend", id)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.version").value(2)).andExpect(jsonPath("$.mesSyncStatus").value("SUCCESS"));
         assertThat(stored(id).getVersion()).isEqualTo(2);
+        var rows = history(id);
+        assertThat(rows).hasSize(4);
+        assertThat(rows).extracting(a -> a.getVersion()).containsExactly(1, 2, 2, 2);
+        assertThat(rows).extracting(a -> a.getEventId()).doesNotHaveDuplicates();
+        assertThat(rows.get(1).getErrorReason()).contains("409", "Production started");
+        assertThat(rows.get(1).getMesResult()).isNull();
+        assertThat(rows.get(2).getErrorReason()).contains("latest outage");
+        assertThat(rows.get(3).getStatus()).isEqualTo(MesSyncStatus.SUCCESS);
     }
 
     @Test
@@ -181,6 +216,9 @@ class WorkOrderApiIntegrationTest {
         Long id = create();
         assertThat(stored(id).getMesSyncStatus()).isEqualTo(MesSyncStatus.FAILED);
         assertThat(stored(id).getMesSyncError()).contains("IGNORED_OLD_VERSION");
+        assertThat(history(id)).hasSize(1);
+        assertThat(history(id).get(0).getStatus()).isEqualTo(MesSyncStatus.FAILED);
+        assertThat(history(id).get(0).getMesResult().name()).isEqualTo("IGNORED_OLD_VERSION");
     }
 
     @Test
@@ -188,6 +226,9 @@ class WorkOrderApiIntegrationTest {
         expectSync(1, 100).andRespond(withSuccess());
         Long id = create();
         assertThat(stored(id).getMesSyncStatus()).isEqualTo(MesSyncStatus.FAILED);
+        assertThat(history(id)).hasSize(1);
+        assertThat(history(id).get(0).getMesResult()).isNull();
+        assertThat(history(id).get(0).getErrorReason()).contains("불일치");
     }
 
     @Test
@@ -219,5 +260,103 @@ class WorkOrderApiIntegrationTest {
                 .andExpect(jsonPath("$.paths['/api/work-orders/{id}'].put.requestBody.content['application/json'].examples.request").exists())
                 .andExpect(jsonPath("$.paths['/api/work-orders/{id}'].put.responses['200'].content['application/json'].examples.mesFailure").exists())
                 .andExpect(jsonPath("$.paths['/api/work-orders/{id}/resend'].post.responses['409']").exists());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"number", "receivedVersion", "appliedVersion", "missingResult", "invalidOld"})
+    void mismatchedResponseContractPersistsFailure(String mismatch) throws Exception {
+        String body = switch (mismatch) {
+            case "number" -> response(1, 1, "CREATED").replace("WO-API-001", "OTHER");
+            case "receivedVersion" -> response(2, 1, "CREATED");
+            case "appliedVersion" -> response(1, 2, "UPDATED");
+            case "missingResult" -> response(1, 1, "CREATED").replace("\"CREATED\"", "null");
+            default -> response(1, 1, "IGNORED_OLD_VERSION");
+        };
+        expectSync(1, 100).andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+        Long id = create();
+        var row = history(id).get(0);
+        assertThat(attempts.count()).isEqualTo(1);
+        assertThat(row.getStatus()).isEqualTo(MesSyncStatus.FAILED);
+        assertThat(row.getMesResult()).isNull();
+        assertThat(row.getEventId()).isNotNull();
+        assertThat(row.getErrorReason()).isEqualTo(stored(id).getMesSyncError()).contains("불일치");
+    }
+
+    @Test
+    void historyMatchesHttpEventAndPendingIsSavedBeforeHttp() throws Exception {
+        expectSync(1, 100).andExpect(request -> {
+            var rows = attempts.findAll(); // 같은 ERP 트랜잭션에서 HTTP 전 이력 INSERT를 확인
+            assertThat(rows).hasSize(1);
+            var row = rows.get(0);
+            assertThat(row.getStatus()).isEqualTo(MesSyncStatus.PENDING);
+            assertThat(row.getCompletedAt()).isNull();
+            org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath("$.eventId")
+                    .value(row.getEventId().toString()).match(request);
+        }).andRespond(withSuccess(response(1, 1, "CREATED"), MediaType.APPLICATION_JSON));
+        Long id = create();
+        assertThat(history(id).get(0).getStatus()).isEqualTo(MesSyncStatus.SUCCESS);
+    }
+
+    @Test
+    void longHttpFailureIsTruncatedInBothCurrentStateAndHistory() throws Exception {
+        expectSync(1, 100).andRespond(withStatus(HttpStatus.CONFLICT).body("x".repeat(2000)));
+        Long id = create();
+        assertThat(history(id).get(0).getErrorReason()).hasSize(1000)
+                .isEqualTo(stored(id).getMesSyncError());
+    }
+
+    @Test
+    void queriesArePagedNewestFirstAndEventLookupIsIndependentOfWorkOrder() throws Exception {
+        expectSync(1, 100).andRespond(withException(new IOException("lost")));
+        Long id = create();
+        var first = history(id).get(0);
+        mes.verify(); mes.reset();
+        expectSync(1, 100).andRespond(withSuccess(response(1, 1, "IGNORED_SAME_VERSION"), MediaType.APPLICATION_JSON));
+        mvc.perform(post("/api/work-orders/{id}/resend", id)).andExpect(status().isOk());
+        var last = history(id).get(1);
+        mvc.perform(get("/api/work-orders/{id}/sync-attempts", id).param("size", "1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(last.getId()))
+                .andExpect(jsonPath("$.content[0].erpWorkOrderId").value(id))
+                .andExpect(jsonPath("$.content[0].workOrder").doesNotExist())
+                .andExpect(jsonPath("$.totalElements").value(2)).andExpect(jsonPath("$.totalPages").value(2));
+        mvc.perform(get("/api/work-orders/{id}/sync-attempts", id).param("page", "1").param("size", "1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].id").value(first.getId()));
+        mvc.perform(get("/api/sync-attempts/events/{eventId}", first.getEventId()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content[0].status").value("FAILED"));
+        // 추적 ID에 유일성 제약을 두지 않는다. 수신 쪽과 동일한 목록 응답 계약.
+        var repeated = com.factoryflow.erp.workorder.entity.MesSyncAttempt.pending(
+                new com.factoryflow.erp.workorder.dto.WorkOrderSyncRequest(
+                        com.factoryflow.erp.workorder.entity.SourceSystem.ERP, first.getEventId(),
+                        first.getEventType(), id, first.getWorkOrderNo(), 1, "PRODUCT-A001", 100,
+                        LocalDate.of(2026, 9, 10), 1, "ROUTING-A", 1));
+        repeated.fail("repeated event", null);
+        attempts.save(repeated);
+        repository.deleteById(id);
+        mvc.perform(get("/api/sync-attempts/events/{eventId}", first.getEventId()).param("size", "1"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2));
+    }
+
+    @Test
+    void historyQueriesReturn404AndValidatePaging() throws Exception {
+        mvc.perform(get("/api/work-orders/999/sync-attempts")).andExpect(status().isNotFound());
+        mvc.perform(get("/api/sync-attempts/events/{id}", java.util.UUID.randomUUID())).andExpect(status().isNotFound());
+        mvc.perform(get("/api/sync-attempts/events/not-a-uuid")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/work-orders/999/sync-attempts").param("page", "-1")).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/work-orders/999/sync-attempts").param("size", "101")).andExpect(status().isBadRequest());
+        var order = repository.save(WorkOrder.create(new com.factoryflow.erp.workorder.dto.WorkOrderCreateRequest(
+                "EMPTY", "P", 1, LocalDate.of(2026, 9, 10), 0, null, 1)));
+        mvc.perform(get("/api/work-orders/{id}/sync-attempts", order.getId()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.content").isEmpty());
+    }
+
+    @Test
+    void openApiDocumentsHistoryPagingExamplesAndResultSchemas() throws Exception {
+        mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.paths['/api/work-orders/{id}/sync-attempts'].get.parameters[?(@.name == 'size')]").isNotEmpty())
+                .andExpect(jsonPath("$.paths['/api/sync-attempts/events/{eventId}'].get.responses['200'].content['application/json'].examples.history").exists())
+                .andExpect(jsonPath("$.paths['/api/sync-attempts/events/{eventId}'].get.responses['404'].content['application/json'].examples").exists())
+                .andExpect(jsonPath("$.components.schemas.MesSyncAttemptResponse.properties.eventId.description").exists())
+                .andExpect(jsonPath("$.components.schemas.MesSyncAttemptResponse.properties.status.enum").isArray());
     }
 }

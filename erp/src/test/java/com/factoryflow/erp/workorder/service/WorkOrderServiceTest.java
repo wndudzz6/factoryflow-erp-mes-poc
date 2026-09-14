@@ -2,6 +2,10 @@ package com.factoryflow.erp.workorder.service;
 
 import com.factoryflow.erp.workorder.client.MesWorkOrderClient;
 import com.factoryflow.erp.workorder.dto.WorkOrderCreateRequest;
+import com.factoryflow.erp.workorder.dto.WorkOrderSyncRequest;
+import com.factoryflow.erp.workorder.dto.WorkOrderSyncResponse;
+import com.factoryflow.erp.workorder.repository.MesSyncAttemptRepository;
+import com.factoryflow.erp.workorder.entity.MesSyncAttempt;
 import com.factoryflow.erp.workorder.entity.MesSyncStatus;
 import com.factoryflow.erp.workorder.entity.WorkOrder;
 import com.factoryflow.erp.workorder.repository.WorkOrderRepository;
@@ -32,6 +36,8 @@ class WorkOrderServiceTest {
     @Mock
     private MesWorkOrderClient mesWorkOrderClient;
 
+    @Mock private MesSyncAttemptRepository mesSyncAttemptRepository;
+
     @InjectMocks
     private WorkOrderService workOrderService;
 
@@ -39,6 +45,11 @@ class WorkOrderServiceTest {
 
     @BeforeEach
     void setUp() {
+        // 공통 협력 객체의 기본 동작. 입력 거부/무변경 테스트에서는 호출하지 않는다.
+        lenient().when(mesSyncAttemptRepository.save(any(MesSyncAttempt.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(mesWorkOrderClient.sync(any(WorkOrderSyncRequest.class)))
+                .thenAnswer(invocation -> success(invocation.getArgument(0)));
         request = new WorkOrderCreateRequest(
                 "WO-20260903-TEST-001",
                 "PRODUCT-A001",
@@ -77,7 +88,7 @@ class WorkOrderServiceTest {
         verify(workOrderRepository)
                 .save(any(WorkOrder.class));
         verify(mesWorkOrderClient)
-                .sync(result);
+                .sync(any(WorkOrderSyncRequest.class));
     }
 
     @Test
@@ -93,7 +104,7 @@ class WorkOrderServiceTest {
 
         doThrow(new RuntimeException("MES connection failed"))
                 .when(mesWorkOrderClient)
-                .sync(any(WorkOrder.class));
+                .sync(any(WorkOrderSyncRequest.class));
 
         // when
         WorkOrder result = workOrderService.create(request);
@@ -110,7 +121,7 @@ class WorkOrderServiceTest {
         verify(workOrderRepository)
                 .save(any(WorkOrder.class));
         verify(mesWorkOrderClient)
-                .sync(result);
+                .sync(any(WorkOrderSyncRequest.class));
     }
 
     @Test
@@ -133,6 +144,11 @@ class WorkOrderServiceTest {
         verifyNoInteractions(mesWorkOrderClient);
     }
 
+    private WorkOrderSyncResponse success(WorkOrderSyncRequest sent) {
+        return new WorkOrderSyncResponse(11L, sent.workOrderNo(), sent.version(), sent.version(),
+                WorkOrderSyncResponse.Result.CREATED, "processed");
+    }
+
     private WorkOrder existing() {
         WorkOrder workOrder = WorkOrder.create(request);
         when(workOrderRepository.findById(1L)).thenReturn(Optional.of(workOrder));
@@ -149,25 +165,25 @@ class WorkOrderServiceTest {
         WorkOrder existing = existing();
         existing.markSyncFailed("previous failure");
         doAnswer(invocation -> {
-            WorkOrder sent = invocation.getArgument(0);
-            assertThat(sent.getVersion()).isEqualTo(2);
-            assertThat(sent.getPlannedQuantity()).isEqualTo(200);
-            assertThat(sent.getMesSyncStatus()).isEqualTo(MesSyncStatus.PENDING);
-            assertThat(sent.getMesSyncError()).isNull();
-            return null;
-        }).when(mesWorkOrderClient).sync(existing);
+            WorkOrderSyncRequest sent = invocation.getArgument(0);
+            assertThat(sent.version()).isEqualTo(2);
+            assertThat(sent.plannedQuantity()).isEqualTo(200);
+            assertThat(existing.getMesSyncStatus()).isEqualTo(MesSyncStatus.PENDING);
+            assertThat(existing.getMesSyncError()).isNull();
+            return success(invocation.getArgument(0));
+        }).when(mesWorkOrderClient).sync(any(WorkOrderSyncRequest.class));
 
         WorkOrder result = workOrderService.update(1L, updateRequest(200));
 
         assertThat(result.getMesSyncStatus()).isEqualTo(MesSyncStatus.SUCCESS);
         assertThat(result.getMesSyncError()).isNull();
-        verify(mesWorkOrderClient).sync(existing);
+        verify(mesWorkOrderClient).sync(any(WorkOrderSyncRequest.class));
     }
 
     @Test
     void updateFailureKeepsNewPlanAndLatestError() {
         WorkOrder existing = existing();
-        doThrow(new RuntimeException("MES unavailable")).when(mesWorkOrderClient).sync(existing);
+        doThrow(new RuntimeException("MES unavailable")).when(mesWorkOrderClient).sync(any(WorkOrderSyncRequest.class));
 
         WorkOrder result = workOrderService.update(1L, updateRequest(200));
 
@@ -200,8 +216,8 @@ class WorkOrderServiceTest {
             assertThat(existing.getPlannedQuantity()).isEqualTo(250);
             assertThat(existing.getMesSyncStatus()).isEqualTo(MesSyncStatus.PENDING);
             assertThat(existing.getMesSyncError()).isNull();
-            return null;
-        }).when(mesWorkOrderClient).sync(existing);
+            return success(invocation.getArgument(0));
+        }).when(mesWorkOrderClient).sync(any(WorkOrderSyncRequest.class));
 
         WorkOrder result = workOrderService.resend(1L);
 
@@ -214,7 +230,7 @@ class WorkOrderServiceTest {
     void resendFailureUpdatesErrorWithoutIncreasingVersion() {
         WorkOrder existing = existing();
         existing.markSyncFailed("old error");
-        doThrow(new RuntimeException("new error")).when(mesWorkOrderClient).sync(existing);
+        doThrow(new RuntimeException("new error")).when(mesWorkOrderClient).sync(any(WorkOrderSyncRequest.class));
 
         WorkOrder result = workOrderService.resend(1L);
 

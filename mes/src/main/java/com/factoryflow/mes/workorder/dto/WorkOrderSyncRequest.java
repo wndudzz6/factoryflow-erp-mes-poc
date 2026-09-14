@@ -10,7 +10,7 @@ import java.util.UUID;
 
 public record WorkOrderSyncRequest(
         @NotNull SourceSystem sourceSystem,
-        @NotNull UUID eventId,
+        @NotNull @Schema(description = "ERP 전송 추적 ID. 동일 ID의 반복 수신도 기록하며 version으로 반영 여부 판정") UUID eventId,
         @NotBlank String eventType,
 
         @NotNull @Positive Long externalId,

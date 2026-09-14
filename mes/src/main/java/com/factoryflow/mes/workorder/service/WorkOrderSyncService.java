@@ -5,6 +5,11 @@ import com.factoryflow.mes.workorder.dto.WorkOrderSyncResponse;
 import com.factoryflow.mes.workorder.dto.WorkOrderExecutionStatusResponse;
 import com.factoryflow.mes.workorder.entity.WorkOrderExecutionStatus;
 import java.util.NoSuchElementException;
+import java.time.LocalDateTime;
+import com.factoryflow.mes.workorder.entity.WorkOrderSyncHistory;
+import com.factoryflow.mes.workorder.entity.WorkOrderSyncResult;
+import com.factoryflow.mes.workorder.exception.WorkOrderConflictException;
+import com.factoryflow.mes.workorder.repository.WorkOrderSyncHistoryRepository;
 import static com.factoryflow.mes.workorder.dto.WorkOrderSyncResponse.Result.*;
 import com.factoryflow.mes.workorder.entity.SourceSystem;
 import com.factoryflow.mes.workorder.entity.WorkOrder;
@@ -17,22 +22,42 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class WorkOrderSyncService {
     private final WorkOrderRepository workOrderRepository;
+    private final WorkOrderSyncHistoryRepository historyRepository;
+    private final WorkOrderSyncHistoryWriter historyWriter;
 
     @Transactional
     public WorkOrderSyncResponse sync(WorkOrderSyncRequest request) {
 
+        LocalDateTime receivedAt = LocalDateTime.now();
         if (request.sourceSystem() != SourceSystem.ERP) {
-            throw new IllegalArgumentException(
-                    "현재는 ERP 작업지시만 지원합니다."
-            );
+            String reason = "현재는 ERP 작업지시만 지원합니다.";
+            historyWriter.recordRejection(WorkOrderSyncHistory.completed(request, null, null, null,
+                    WorkOrderSyncResult.REJECTED_UNSUPPORTED_SOURCE, reason, receivedAt));
+            throw new IllegalArgumentException(reason);
         }
-        return workOrderRepository
-                .findBySourceSystemAndExternalId(
-                        request.sourceSystem(),
-                        request.externalId()
-                )
-                .map(existing -> updateExisting(existing, request))
-                .orElseGet(() -> createNew(request));
+        WorkOrder existing = workOrderRepository
+                .findBySourceSystemAndExternalId(request.sourceSystem(), request.externalId()).orElse(null);
+        Integer previousVersion = existing == null ? null : existing.getSourceVersion();
+        // DB 제약 위반 전에 업무 충돌로 판정하여 신규 작업지시가 없는 거부도 기록한다.
+        if (existing == null && workOrderRepository.findByWorkOrderNo(request.workOrderNo()).isPresent()) {
+            String reason = "작업지시 번호가 다른 원천 작업지시에 이미 사용되었습니다: " + request.workOrderNo();
+            historyWriter.recordRejection(WorkOrderSyncHistory.completed(request, null, null, null,
+                    WorkOrderSyncResult.REJECTED_IDENTITY_CONFLICT, reason, receivedAt));
+            throw new IllegalStateException(reason);
+        }
+        WorkOrderSyncResponse response;
+        try {
+            response = existing == null ? createNew(request) : updateExisting(existing, request);
+        } catch (WorkOrderConflictException exception) {
+            // validatePlanChange는 어떤 계획값도 변경하기 전에 예외를 발생시킨다.
+            historyWriter.recordRejection(WorkOrderSyncHistory.completed(request, existing.getId(),
+                    previousVersion, previousVersion, exception.getHistoryResult(), exception.getMessage(), receivedAt));
+            throw exception;
+        }
+        historyRepository.save(WorkOrderSyncHistory.completed(request, response.id(), previousVersion,
+                response.appliedVersion(), WorkOrderSyncResult.valueOf(response.result().name()),
+                response.message(), receivedAt));
+        return response;
     }
 
     private WorkOrderSyncResponse createNew(WorkOrderSyncRequest request) {

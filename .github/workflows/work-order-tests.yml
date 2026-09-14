@@ -2,7 +2,7 @@ name: Work order tests
 
 on:
   push:
-    branches: [feature/work-order-change-resend]
+    branches: [feature/work-order-change-resend, feature/sync-history-tracing]
   pull_request:
     paths:
       - 'erp/**'
